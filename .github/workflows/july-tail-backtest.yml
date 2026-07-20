@@ -1,0 +1,36 @@
+name: July Tail Backtest
+
+on:
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  backtest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install dependencies
+        run: python -m pip install --upgrade pip requests
+      - name: Run July 2026 tail backtest
+        run: python tools/july_tail_backtest.py
+      - name: Print summary
+        if: always()
+        run: |
+          if [ -f backtest_output/july_2026_tail_backtest.md ]; then
+            cat backtest_output/july_2026_tail_backtest.md
+          fi
+      - name: Upload results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: july-tail-backtest-results
+          path: backtest_output/
+          if-no-files-found: warn
