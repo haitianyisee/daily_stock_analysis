@@ -1,0 +1,107 @@
+name: July Tail Backtest
+
+on:
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: july-tail-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  universe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install universe dependencies
+        run: python -m pip install --upgrade pip requests baostock
+      - name: Build main-board universe
+        run: python tools/july_tail_backtest_sharded_v3.py universe --out universe_output/universe.json
+      - name: Upload universe
+        uses: actions/upload-artifact@v4
+        with:
+          name: july-tail-universe
+          path: universe_output/universe.json
+          if-no-files-found: error
+
+  shard:
+    needs: universe
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    strategy:
+      fail-fast: false
+      max-parallel: 3
+      matrix:
+        shard: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install dependencies
+        run: python -m pip install --upgrade pip requests
+      - name: Download universe
+        uses: actions/download-artifact@v4
+        with:
+          name: july-tail-universe
+          path: universe_input
+      - name: Run shard ${{ matrix.shard }}
+        env:
+          BACKTEST_WORKERS: '2'
+        run: >-
+          python tools/july_tail_backtest_sharded_v3.py shard
+          --universe universe_input/universe.json
+          --index ${{ matrix.shard }}
+          --count 12
+          --out shard_output/shard_${{ matrix.shard }}.json
+      - name: Upload shard ${{ matrix.shard }}
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: july-tail-shard-${{ matrix.shard }}
+          path: shard_output/shard_${{ matrix.shard }}.json
+          if-no-files-found: error
+
+  merge:
+    needs: shard
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Download shard outputs
+        uses: actions/download-artifact@v4
+        with:
+          pattern: july-tail-shard-*
+          path: merged_shards
+          merge-multiple: true
+      - name: Merge and report
+        run: >-
+          python tools/july_tail_backtest_sharded_v3.py merge
+          --input merged_shards
+          --expected-shards 12
+          --out backtest_output
+      - name: Print report
+        if: always()
+        run: |
+          if [ -f backtest_output/july_2026_tail_backtest.md ]; then
+            cat backtest_output/july_2026_tail_backtest.md
+          fi
+      - name: Upload final result
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: july-tail-backtest-final
+          path: backtest_output/
+          if-no-files-found: error
