@@ -1,0 +1,66 @@
+name: ELP1030 5Y Backtest
+
+on:
+  push:
+    branches:
+      - chatgpt-elp5y-backtest-20260828
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      PYTHONUNBUFFERED: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install pandas numpy requests baostock
+      - name: Probe data chain
+        run: |
+          rm -rf elp1030_results
+          python research/elp1030_5y_backtest.py --probe --max-events 30
+      - name: Upload probe results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: elp1030-probe-results
+          path: elp1030_results/
+          if-no-files-found: warn
+
+  full:
+    needs: probe
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    env:
+      PYTHONUNBUFFERED: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install pandas numpy requests baostock
+      - name: Run frozen five-year backtest
+        run: |
+          rm -rf elp1030_results
+          python research/elp1030_5y_backtest.py --start 20210809 --end 20260807
+      - name: Upload five-year results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: elp1030-5y-results
+          path: elp1030_results/
+          if-no-files-found: warn
