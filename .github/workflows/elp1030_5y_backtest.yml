@@ -1,4 +1,4 @@
-name: ELP1030 5Y Backtest
+name: ELP1030 5Y Parallel Backtest
 
 on:
   push:
@@ -8,13 +8,67 @@ on:
 
 permissions:
   contents: read
+  actions: write
+
+concurrency:
+  group: elp1030-parallel-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
-  probe:
+  cancel-old-serial:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Cancel superseded serial run
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          code=$(curl -sS -o /tmp/cancel.txt -w "%{http_code}" \
+            -X POST \
+            -H "Accept: application/vnd.github+json" \
+            -H "Authorization: Bearer ${GH_TOKEN}" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            "https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/runs/33152212602/cancel")
+          echo "cancel old serial run HTTP=${code}"
+          cat /tmp/cancel.txt || true
+
+  shard:
+    needs: cancel-old-serial
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [0, 1, 2, 3, 4, 5, 6, 7]
+    runs-on: ubuntu-latest
+    timeout-minutes: 150
+    env:
+      PYTHONUNBUFFERED: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install pandas numpy baostock
+      - name: Run shard ${{ matrix.shard }} of 8
+        run: |
+          rm -rf elp1030_shard_${{ matrix.shard }}
+          python research/elp1030_5y_backtest_v3_shard.py \
+            --start 20210809 --end 20260807 \
+            --shard-index ${{ matrix.shard }} --shard-total 8
+      - name: Upload shard
+        uses: actions/upload-artifact@v4
+        with:
+          name: elp1030-shard-${{ matrix.shard }}
+          path: elp1030_shard_${{ matrix.shard }}/
+          if-no-files-found: error
+          retention-days: 30
+
+  merge:
+    needs: shard
     runs-on: ubuntu-latest
     timeout-minutes: 30
-    env:
-      PYTHONUNBUFFERED: "1"
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -25,42 +79,19 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install pandas numpy baostock
-      - name: Probe BaoStock daily and 5m reconstruction
+      - name: Download all shard artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: elp1030-shard-*
+          path: shard_artifacts
+      - name: Merge and calculate final metrics
         run: |
-          rm -rf elp1030_results
-          python research/elp1030_5y_backtest_v2.py --probe --max-events 30
-      - name: Upload probe results
-        if: always()
+          find shard_artifacts -maxdepth 2 -type f | sort | head -50
+          python research/elp1030_5y_merge_v3.py --input shard_artifacts --output elp1030_results
+      - name: Upload final five-year results
         uses: actions/upload-artifact@v4
         with:
-          name: elp1030-probe-v2-results
+          name: elp1030-5y-parallel-results
           path: elp1030_results/
-          if-no-files-found: warn
-
-  full:
-    needs: probe
-    runs-on: ubuntu-latest
-    timeout-minutes: 360
-    env:
-      PYTHONUNBUFFERED: "1"
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
-          cache: pip
-      - name: Install dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install pandas numpy baostock
-      - name: Run frozen five-year backtest
-        run: |
-          rm -rf elp1030_results
-          python research/elp1030_5y_backtest_v2.py --start 20210809 --end 20260807
-      - name: Upload five-year results
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: elp1030-5y-v2-results
-          path: elp1030_results/
-          if-no-files-found: warn
+          if-no-files-found: error
+          retention-days: 90
