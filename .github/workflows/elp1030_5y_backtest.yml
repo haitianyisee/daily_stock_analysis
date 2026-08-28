@@ -24,16 +24,16 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install pandas numpy requests baostock
-      - name: Probe data chain
+          pip install pandas numpy baostock
+      - name: Probe BaoStock daily and 5m reconstruction
         run: |
           rm -rf elp1030_results
-          python research/elp1030_5y_backtest.py --probe --max-events 30
+          python research/elp1030_5y_backtest_v2.py --probe --max-events 30
       - name: Upload probe results
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: elp1030-probe-results
+          name: elp1030-probe-v2-results
           path: elp1030_results/
           if-no-files-found: warn
 
@@ -52,15 +52,15 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install pandas numpy requests baostock
+          pip install pandas numpy baostock
       - name: Run frozen five-year backtest
         run: |
           rm -rf elp1030_results
-          python research/elp1030_5y_backtest.py --start 20210809 --end 20260807
+          python research/elp1030_5y_backtest_v2.py --start 20210809 --end 20260807
       - name: Upload five-year results
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: elp1030-5y-results
+          name: elp1030-5y-v2-results
           path: elp1030_results/
           if-no-files-found: warn
